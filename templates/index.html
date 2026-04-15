@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FORENSTIX — Digital Forensic File Triage</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #080a0f;
+            --bg-secondary: #0d1117;
+            --bg-card: #111820;
+            --bg-card-hover: #151d27;
+            --border: #1b2838;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #484f58;
+            --accent-cyan: #00f0ff;
+            --accent-cyan-dim: #00f0ff40;
+            --accent-green: #00ff88;
+            --accent-red: #ff3355;
+            --accent-orange: #ff8800;
+            --accent-yellow: #ffcc00;
+            --accent-blue: #0088ff;
+            --accent-purple: #a855f7;
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg-primary); color: var(--text-primary);
+            font-family: var(--font-display); min-height: 100vh; overflow-x: hidden;
+        }
+        body::before {
+            content: ''; position: fixed; inset: 0;
+            background: radial-gradient(ellipse at 20% 20%, #00f0ff06 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 80%, #0088ff04 0%, transparent 50%),
+                        repeating-linear-gradient(0deg, transparent, transparent 2px, #00f0ff02 2px, #00f0ff02 3px);
+            pointer-events: none; z-index: 0;
+        }
+        .scanline {
+            position: fixed; top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(90deg, transparent, var(--accent-cyan-dim), transparent);
+            animation: scanline 4s linear infinite; pointer-events: none; z-index: 9999;
+        }
+        @keyframes scanline { 0%{top:-3px;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:100vh;opacity:0} }
+
+        .container { max-width: 1100px; margin: 0 auto; padding: 30px 24px; position: relative; z-index: 1; }
+
+        /* Header */
+        .header { text-align: center; margin-bottom: 36px; padding: 40px 0 20px; }
+        .logo { font-family: var(--font-mono); font-size: 2.8rem; font-weight: 700;
+                 letter-spacing: 12px; color: var(--accent-cyan);
+                 text-shadow: 0 0 30px var(--accent-cyan-dim), 0 0 60px #00f0ff10; }
+        .tagline { font-size: 0.85rem; color: var(--text-secondary); letter-spacing: 4px;
+                   text-transform: uppercase; font-weight: 300; margin-top: 4px; }
+        .version-badge { display: inline-block; margin-top: 12px; padding: 3px 14px;
+                         background: var(--accent-cyan-dim); border: 1px solid #00f0ff30;
+                         border-radius: 20px; font-family: var(--font-mono); font-size: 0.65rem;
+                         color: var(--accent-cyan); letter-spacing: 2px; }
+
+        /* Mode Tabs */
+        .mode-tabs {
+            display: flex; gap: 0; margin-bottom: 30px; background: var(--bg-secondary);
+            border-radius: 12px; border: 1px solid var(--border); overflow: hidden;
+        }
+        .mode-tab {
+            flex: 1; padding: 14px 16px; text-align: center; cursor: pointer;
+            font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 2px;
+            text-transform: uppercase; color: var(--text-muted);
+            transition: all 0.25s; border: none; background: none;
+        }
+        .mode-tab:hover { color: var(--text-secondary); background: #ffffff05; }
+        .mode-tab.active { color: var(--accent-cyan); background: #00f0ff08;
+                           box-shadow: inset 0 -2px 0 var(--accent-cyan); }
+        .mode-tab .tab-icon { display: block; font-size: 1.2rem; margin-bottom: 4px; }
+
+        /* Drop Zones */
+        .drop-zone {
+            border: 2px dashed var(--border); border-radius: 16px; padding: 50px 40px;
+            text-align: center; cursor: pointer; transition: all 0.3s;
+            background: var(--bg-secondary); position: relative; overflow: hidden;
+        }
+        .drop-zone::before {
+            content: ''; position: absolute; inset: 0;
+            background: radial-gradient(circle at center, #00f0ff05, transparent 70%);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent-cyan); background: #0d1117;
+            box-shadow: 0 0 40px #00f0ff08, inset 0 0 40px #00f0ff05;
+        }
+        .drop-zone:hover::before, .drop-zone.dragover::before { opacity: 1; }
+        .drop-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.5; }
+        .drop-text { font-size: 1rem; font-weight: 500; margin-bottom: 6px; }
+        .drop-subtext { font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); }
+        .file-input { display: none; }
+
+        .mode-section { display: none; }
+        .mode-section.active { display: block; }
+
+        /* Loading */
+        .loading-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(8,10,15,0.92);
+            z-index: 1000; justify-content: center; align-items: center; flex-direction: column;
+        }
+        .loading-overlay.active { display: flex; }
+        .loading-spinner {
+            width: 60px; height: 60px; border: 3px solid var(--border);
+            border-top: 3px solid var(--accent-cyan); border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { font-family: var(--font-mono); color: var(--accent-cyan);
+                        font-size: 0.85rem; letter-spacing: 3px; animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+        /* Results */
+        .results-panel { display: none; margin-top: 30px; animation: fadeIn 0.5s ease; }
+        .results-panel.active { display: block; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)} }
+
+        /* Risk Banner */
+        .risk-banner {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 20px 26px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border);
+        }
+        .risk-banner.clean { background: linear-gradient(135deg,#00ff8808,#00ff8803); border-color: #00ff8830; }
+        .risk-banner.caution { background: linear-gradient(135deg,#ffcc0008,#ffcc0003); border-color: #ffcc0030; }
+        .risk-banner.suspicious { background: linear-gradient(135deg,#ff880008,#ff880003); border-color: #ff880030; }
+        .risk-banner.critical { background: linear-gradient(135deg,#ff335508,#ff335503); border-color: #ff335530; }
+        .risk-info h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 3px; }
+        .risk-info p { font-size: 0.75rem; color: var(--text-secondary); font-family: var(--font-mono); }
+        .risk-score-circle {
+            width: 70px; height: 70px; border-radius: 50%; display: flex;
+            align-items: center; justify-content: center; font-family: var(--font-mono);
+            font-size: 1.5rem; font-weight: 700; flex-shrink: 0;
+        }
+        .risk-score-circle.clean { border: 3px solid var(--accent-green); color: var(--accent-green); }
+        .risk-score-circle.caution { border: 3px solid var(--accent-yellow); color: var(--accent-yellow); }
+        .risk-score-circle.suspicious { border: 3px solid var(--accent-orange); color: var(--accent-orange); }
+        .risk-score-circle.critical { border: 3px solid var(--accent-red); color: var(--accent-red); }
+
+        /* Cards */
+        .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+        @media(max-width:768px) { .card-grid{grid-template-columns:1fr} }
+        .card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 20px; transition: all 0.2s;
+        }
+        .card:hover { border-color: #1b283850; background: var(--bg-card-hover); }
+        .card-full { grid-column: 1 / -1; }
+        .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .card-icon { font-size: 1rem; }
+        .card-title { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 3px;
+                      color: var(--text-secondary); font-weight: 600; }
+        .data-row { display: flex; justify-content: space-between; align-items: center;
+                    padding: 7px 0; border-bottom: 1px solid #1b283830; }
+        .data-row:last-child { border-bottom: none; }
+        .data-label { font-size: 0.75rem; color: var(--text-secondary); font-family: var(--font-mono); }
+        .data-value { font-size: 0.75rem; color: var(--text-primary); font-family: var(--font-mono);
+                      text-align: right; word-break: break-all; max-width: 60%; }
+        .hash-value { font-size: 0.65rem; color: var(--accent-cyan); word-break: break-all;
+                      cursor: pointer; transition: color 0.2s; }
+        .hash-value:hover { color: var(--accent-green); }
+
+        /* VT Button */
+        .vt-btn {
+            margin-top: 12px; padding: 8px 16px; background: #a855f715; border: 1px solid #a855f740;
+            border-radius: 8px; color: var(--accent-purple); font-family: var(--font-mono);
+            font-size: 0.7rem; cursor: pointer; transition: all 0.2s; letter-spacing: 1px; width: 100%;
+        }
+        .vt-btn:hover { background: #a855f725; border-color: var(--accent-purple);
+                        box-shadow: 0 0 15px #a855f720; }
+        .vt-results { margin-top: 12px; padding: 14px; background: var(--bg-primary);
+                      border-radius: 8px; border: 1px solid var(--border); }
+        .vt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .vt-threat { font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; }
+        .vt-detection { font-size: 0.72rem; font-family: var(--font-mono); padding: 4px 0;
+                        color: var(--text-secondary); border-bottom: 1px solid #1b283820; }
+
+        /* Anomaly Cards */
+        .anomaly-card { padding: 14px 18px; border-radius: 10px; margin-bottom: 8px; border-left: 4px solid; }
+        .anomaly-card.critical { background: #ff33550a; border-color: var(--accent-red); }
+        .anomaly-card.warning { background: #ff88000a; border-color: var(--accent-orange); }
+        .anomaly-card.info { background: #0088ff0a; border-color: var(--accent-blue); }
+        .anomaly-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 3px; }
+        .anomaly-detail { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; }
+        .anomaly-rec { font-size: 0.72rem; color: var(--accent-cyan); font-style: italic; }
+
+        /* Entropy */
+        .entropy-bar-track { height: 7px; background: var(--bg-primary); border-radius: 4px;
+                             overflow: hidden; margin-top: 6px; }
+        .entropy-bar-fill { height: 100%; border-radius: 4px; transition: width 1s ease; }
+
+        /* Report */
+        .report-section { background: var(--bg-card); border: 1px solid var(--border);
+                          border-radius: 12px; padding: 26px; margin-top: 20px; }
+        .report-section h2 { color: var(--accent-cyan); margin-bottom: 6px; font-size: 1rem; }
+        .report-section h3 { color: var(--text-primary); margin: 16px 0 6px; font-size: 0.9rem; }
+        .report-section p { color: var(--text-secondary); line-height: 1.7; font-size: 0.82rem; margin-bottom: 10px; }
+        .report-section code { background: var(--bg-primary); padding: 2px 7px; border-radius: 4px;
+                               font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan); }
+        .report-section strong { color: var(--text-primary); }
+        .report-section ul,.report-section ol { margin: 8px 0 8px 20px; color: var(--text-secondary);
+                                                  font-size: 0.82rem; line-height: 1.8; }
+
+        /* Buttons */
+        .btn-row { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+        .btn { padding: 11px 24px; border-radius: 8px; border: 1px solid var(--border);
+               font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 1px;
+               cursor: pointer; transition: all 0.2s; text-transform: uppercase; font-weight: 500; }
+        .btn-primary { background: var(--accent-cyan); color: var(--bg-primary); border-color: var(--accent-cyan); }
+        .btn-primary:hover { box-shadow: 0 0 20px var(--accent-cyan-dim); transform: translateY(-1px); }
+        .btn-secondary { background: transparent; color: var(--text-secondary); }
+        .btn-secondary:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+
+        .strings-list { list-style: none; padding: 0; }
+        .strings-list li { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent-cyan);
+                           padding: 3px 0; word-break: break-all; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono);
+               font-size: 0.62rem; font-weight: 600; letter-spacing: 1px; }
+        .tag-green { background: #00ff8815; color: var(--accent-green); }
+        .tag-yellow { background: #ffcc0015; color: var(--accent-yellow); }
+        .tag-orange { background: #ff880015; color: var(--accent-orange); }
+        .tag-red { background: #ff335515; color: var(--accent-red); }
+        .tag-cyan { background: #00f0ff15; color: var(--accent-cyan); }
+        .tag-purple { background: #a855f715; color: var(--accent-purple); }
+
+        .toast { position: fixed; bottom: 30px; right: 30px; padding: 12px 20px;
+                 background: var(--bg-card); border: 1px solid var(--accent-green); border-radius: 8px;
+                 font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-green);
+                 z-index: 9999; animation: toastIn 0.3s ease, toastOut 0.3s ease 2s forwards; }
+        @keyframes toastIn { from{opacity:0;transform:translateY(10px)} }
+        @keyframes toastOut { to{opacity:0;transform:translateY(10px)} }
+
+        /* Batch cards */
+        .batch-file-card {
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+            margin-bottom: 14px; overflow: hidden;
+        }
+        .batch-file-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 20px; cursor: pointer; transition: background 0.2s;
+        }
+        .batch-file-header:hover { background: var(--bg-card-hover); }
+        .batch-file-name { font-weight: 600; font-size: 0.9rem; }
+        .batch-file-body { padding: 0 20px 20px; display: none; }
+        .batch-file-body.open { display: block; }
+
+        /* Comparison table */
+        .cmp-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        .cmp-table th { font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase;
+                        letter-spacing: 2px; color: var(--text-muted); padding: 8px 10px;
+                        text-align: left; border-bottom: 1px solid var(--border); }
+        .cmp-table td { padding: 10px; font-size: 0.78rem; border-bottom: 1px solid #1b283830;
+                        font-family: var(--font-mono); color: var(--text-secondary); }
+        .cmp-table tr:hover td { background: #ffffff03; }
+
+        /* Batch summary bar */
+        .batch-summary {
+            display: flex; gap: 20px; padding: 16px 20px; background: var(--bg-card);
+            border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px;
+        }
+        .batch-stat { text-align: center; flex: 1; }
+        .batch-stat-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; }
+        .batch-stat-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase;
+                            letter-spacing: 2px; margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <div class="scanline"></div>
+    <div class="container">
+        <header class="header">
+            <div class="logo">FORENSTIX</div>
+            <div class="tagline">Digital Forensic File Triage</div>
+            <div class="version-badge">v1.0 — Batch • VirusTotal • Compare</div>
+        </header>
+
+        <!-- Mode Tabs -->
+        <div class="mode-tabs">
+            <button class="mode-tab active" onclick="switchMode('single')">
+                <span class="tab-icon">◎</span>Single File
+            </button>
+            <button class="mode-tab" onclick="switchMode('batch')">
+                <span class="tab-icon">▦</span>Batch Analysis
+            </button>
+            <button class="mode-tab" onclick="switchMode('compare')">
+                <span class="tab-icon">⇋</span>Compare Files
+            </button>
+        </div>
+
+        <!-- SINGLE MODE -->
+        <div class="mode-section active" id="mode-single">
+            <div class="drop-zone" id="dropSingle">
+                <div class="drop-icon">⬡</div>
+                <div class="drop-text">Drop evidence file here</div>
+                <div class="drop-subtext">all file types • max 100MB</div>
+                <input type="file" class="file-input" id="inputSingle">
+            </div>
+            <div class="results-panel" id="resultsSingle"></div>
+        </div>
+
+        <!-- BATCH MODE -->
+        <div class="mode-section" id="mode-batch">
+            <div class="drop-zone" id="dropBatch">
+                <div class="drop-icon">▦</div>
+                <div class="drop-text">Drop multiple files for batch analysis</div>
+                <div class="drop-subtext">up to 20 files • each up to 100MB</div>
+                <input type="file" class="file-input" id="inputBatch" multiple>
+            </div>
+            <div class="results-panel" id="resultsBatch"></div>
+        </div>
+
+        <!-- COMPARE MODE -->
+        <div class="mode-section" id="mode-compare">
+            <div class="drop-zone" id="dropCompare">
+                <div class="drop-icon">⇋</div>
+                <div class="drop-text">Drop 2-10 files to compare</div>
+                <div class="drop-subtext">forensic diff • shared artifacts • relationship analysis</div>
+                <input type="file" class="file-input" id="inputCompare" multiple>
+            </div>
+            <div class="results-panel" id="resultsCompare"></div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">ANALYZING</div>
+    </div>
+
+<script>
+// ─── State ───
+let currentMode = 'single';
+let lastSingleData = null;
+let lastBatchData = null;
+let lastCompareData = null;
+
+// ─── Mode Switching ───
+function switchMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-tab').forEach((t,i) => {
+        t.classList.toggle('active', ['single','batch','compare'][i] === mode);
+    });
+    document.querySelectorAll('.mode-section').forEach(s => s.classList.remove('active'));
+    document.getElementById('mode-' + mode).classList.add('active');
+}
+
+// ─── Drop Zone Setup ───
+function setupDropZone(zoneId, inputId, handler, multi=false) {
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault(); zone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handler(multi ? e.dataTransfer.files : e.dataTransfer.files[0]);
+    });
+    input.addEventListener('change', e => {
+        if (e.target.files.length) handler(multi ? e.target.files : e.target.files[0]);
+    });
+}
+
+setupDropZone('dropSingle', 'inputSingle', handleSingle, false);
+setupDropZone('dropBatch', 'inputBatch', handleBatch, true);
+setupDropZone('dropCompare', 'inputCompare', handleCompare, true);
+
+// ─── Loading ───
+function showLoading(text) {
+    const ov = document.getElementById('loadingOverlay');
+    document.getElementById('loadingText').textContent = text;
+    ov.classList.add('active');
+    const phases = ['COMPUTING HASHES','ANALYZING MAGIC BYTES','EXTRACTING METADATA',
+                    'CALCULATING ENTROPY','SCANNING ANOMALIES','GENERATING REPORT'];
+    let i = 0;
+    ov._interval = setInterval(() => {
+        document.getElementById('loadingText').textContent = phases[i++ % phases.length];
+    }, 1200);
+}
+function hideLoading() {
+    const ov = document.getElementById('loadingOverlay');
+    clearInterval(ov._interval);
+    ov.classList.remove('active');
+}
+
+// ─── SINGLE FILE ───
+async function handleSingle(file) {
+    showLoading('ANALYZING EVIDENCE');
+    try {
+        const fd = new FormData(); fd.append('file', file);
+        const res = await fetch('/analyze', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        lastSingleData = data;
+        const panel = document.getElementById('resultsSingle');
+        panel.innerHTML = buildSingleResult(data);
+        panel.classList.add('active');
+        panel.scrollIntoView({ behavior: 'smooth' });
+    } catch(e) { alert('Error: ' + e.message); }
+    finally { hideLoading(); }
+}
+
+// ─── BATCH ───
+async function handleBatch(files) {
+    showLoading('BATCH PROCESSING');
+    try {
+        const fd = new FormData();
+        for (const f of files) fd.append('files', f);
+        const res = await fetch('/analyze-batch', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        lastBatchData = data;
+        const panel = document.getElementById('resultsBatch');
+        panel.innerHTML = buildBatchResults(data);
+        panel.classList.add('active');
+        panel.scrollIntoView({ behavior: 'smooth' });
+    } catch(e) { alert('Error: ' + e.message); }
+    finally { hideLoading(); }
+}
+
+// ─── COMPARE ───
+async function handleCompare(files) {
+    if (files.length < 2) { alert('Select at least 2 files to compare.'); return; }
+    showLoading('COMPARING FILES');
+    try {
+        const fd = new FormData();
+        for (const f of files) fd.append('files', f);
+        const res = await fetch('/compare', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        lastCompareData = data;
+        const panel = document.getElementById('resultsCompare');
+        panel.innerHTML = buildCompareResults(data);
+        panel.classList.add('active');
+        panel.scrollIntoView({ behavior: 'smooth' });
+    } catch(e) { alert('Error: ' + e.message); }
+    finally { hideLoading(); }
+}
+
+// ─── Build Single Result ───
+function buildSingleResult(data) {
+    const r = data.results;
+    const rc = riskClass(r.risk_score.label);
+    const rcol = riskColor(rc);
+    const ePct = (r.entropy.entropy / 8 * 100).toFixed(1);
+    const eCol = r.entropy.risk_level==='high' ? 'var(--accent-red)' :
+                 r.entropy.risk_level==='medium' ? 'var(--accent-orange)' : 'var(--accent-green)';
+
+    let html = `
+    <div class="risk-banner ${rc}">
+        <div class="risk-info">
+            <h2 style="color:${rcol}">${r.risk_score.label}</h2>
+            <p>${esc(r.metadata.filename)} — ${r.metadata.file_size_human} — ${r.file_type.detected_type}</p>
+        </div>
+        <div class="risk-score-circle ${rc}">${r.risk_score.score}</div>
+    </div>
+    <div class="card-grid">
+        ${hashCard(r)}
+        ${typeCard(r)}
+        ${entropyCard(r, ePct, eCol)}
+        ${metaCard(r)}
+        ${stringsCard(r)}
+        ${exifCard(r)}
+    </div>
+    ${anomalySection(r)}
+    <div class="report-section">
+        <div class="card-header"><span class="card-icon">📄</span>
+        <span class="card-title">Forensic Analyst Report</span></div>
+        ${data.report_html}
+    </div>
+    <div class="btn-row">
+        <button class="btn btn-primary" onclick="exportPDF(lastSingleData)">↓ Export PDF</button>
+        <button class="btn btn-secondary" onclick="copyJSON(lastSingleData.results)">{ } Copy JSON</button>
+        <button class="btn btn-secondary" onclick="resetMode('single')">⟳ New Analysis</button>
+    </div>`;
+    return html;
+}
+
+// ─── Build Batch Results ───
+function buildBatchResults(data) {
+    const br = data.batch_results;
+    const critCount = br.filter(b => b.status==='success' && b.results.risk_score.label==='CRITICAL').length;
+
+    let html = `
+    <div class="batch-summary">
+        <div class="batch-stat"><div class="batch-stat-value" style="color:var(--accent-cyan)">${data.total_files}</div>
+            <div class="batch-stat-label">Files</div></div>
+        <div class="batch-stat"><div class="batch-stat-value" style="color:var(--accent-green)">${data.successful}</div>
+            <div class="batch-stat-label">Analyzed</div></div>
+        <div class="batch-stat"><div class="batch-stat-value" style="color:var(--accent-red)">${critCount}</div>
+            <div class="batch-stat-label">Critical</div></div>
+        <div class="batch-stat"><div class="batch-stat-value" style="color:var(--accent-orange)">${data.failed}</div>
+            <div class="batch-stat-label">Failed</div></div>
+    </div>`;
+
+    // Sort by risk score descending
+    const sorted = [...br].filter(b=>b.status==='success')
+        .sort((a,b)=>b.results.risk_score.score - a.results.risk_score.score);
+
+    sorted.forEach((item, idx) => {
+        const r = item.results;
+        const rc = riskClass(r.risk_score.label);
+        const rcol = riskColor(rc);
+        html += `
+        <div class="batch-file-card">
+            <div class="batch-file-header" onclick="toggleBatch(${idx})">
+                <div>
+                    <span class="batch-file-name">${esc(r.metadata.filename)}</span>
+                    <span class="tag tag-${rc==='clean'?'green':rc==='caution'?'yellow':rc==='suspicious'?'orange':'red'}" style="margin-left:10px">
+                        ${r.risk_score.label} ${r.risk_score.score}/100
+                    </span>
+                </div>
+                <span style="color:var(--text-muted);font-size:0.8rem">▾</span>
+            </div>
+            <div class="batch-file-body" id="batchBody${idx}">
+                <div class="card-grid" style="margin-top:10px">
+                    ${hashCard(r)}
+                    ${typeCard(r)}
+                </div>
+                ${anomalySection(r)}
+                <div class="report-section" style="margin-top:14px">
+                    <div class="card-header"><span class="card-icon">📄</span>
+                    <span class="card-title">Report</span></div>
+                    ${item.report_html}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += `<div class="btn-row">
+        <button class="btn btn-secondary" onclick="resetMode('batch')">⟳ New Batch</button>
+    </div>`;
+    return html;
+}
+
+function toggleBatch(idx) {
+    document.getElementById('batchBody'+idx).classList.toggle('open');
+}
+
+// ─── Build Compare Results ───
+function buildCompareResults(data) {
+    const cmp = data.comparison;
+    const files = cmp.files;
+
+    let html = `
+    <div class="report-section" style="margin-top:0">
+        <div class="card-header"><span class="card-icon">⇋</span>
+        <span class="card-title">Comparison Report — ${files.length} Files</span></div>
+        ${data.narrative_html}
+    </div>
+
+    <div class="card" style="margin-top:20px">
+        <div class="card-header"><span class="card-icon">📊</span>
+        <span class="card-title">Side-by-Side Comparison</span></div>
+        <div style="overflow-x:auto">
+        <table class="cmp-table">
+            <thead><tr>
+                <th>Property</th>
+                ${files.map(f => `<th>${esc(f.filename)}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+                <tr><td>Type</td>${files.map(f=>`<td>${f.type}</td>`).join('')}</tr>
+                <tr><td>Size</td>${files.map(f=>`<td>${f.size}</td>`).join('')}</tr>
+                <tr><td>Risk Score</td>${files.map(f=>`<td><span class="tag tag-${riskClass(f.risk_label)==='clean'?'green':riskClass(f.risk_label)==='caution'?'yellow':riskClass(f.risk_label)==='suspicious'?'orange':'red'}">${f.risk_score}/100</span></td>`).join('')}</tr>
+                <tr><td>Risk Level</td>${files.map(f=>`<td>${f.risk_label}</td>`).join('')}</tr>
+                <tr><td>SHA-256</td>${files.map(f=>`<td style="font-size:0.6rem;color:var(--accent-cyan);word-break:break-all">${f.sha256}</td>`).join('')}</tr>
+            </tbody>
+        </table>
+        </div>
+    </div>`;
+
+    // Entropy comparison chart
+    html += `<div class="card" style="margin-top:14px">
+        <div class="card-header"><span class="card-icon">📊</span>
+        <span class="card-title">Entropy Comparison</span></div>`;
+    cmp.entropy_comparison.forEach(e => {
+        const pct = (e.entropy/8*100).toFixed(1);
+        const col = e.entropy > 7.9 ? 'var(--accent-red)' : e.entropy > 7 ? 'var(--accent-orange)' : 'var(--accent-green)';
+        html += `<div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;font-size:0.78rem;font-family:var(--font-mono)">
+                <span>${esc(e.filename)}</span><span style="color:${col}">${e.entropy.toFixed(4)}</span>
+            </div>
+            <div class="entropy-bar-track"><div class="entropy-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        </div>`;
+    });
+    html += `</div>`;
+
+    // Findings
+    if (cmp.findings && cmp.findings.length) {
+        html += `<div style="margin-top:14px">
+            <div class="card-header" style="margin-bottom:10px">
+                <span class="card-icon">⚠️</span><span class="card-title">Findings (${cmp.findings.length})</span>
+            </div>`;
+        cmp.findings.forEach(f => {
+            const sev = f.severity === 'critical' ? 'critical' : f.severity === 'warning' ? 'warning' : 'info';
+            html += `<div class="anomaly-card ${sev}">
+                <div class="anomaly-title">${f.title}</div>
+                <div class="anomaly-detail">${f.detail}</div>
+            </div>`;
+        });
+        html += `</div>`;
+    }
+
+    html += `<div class="btn-row">
+        <button class="btn btn-primary" onclick="exportComparePDF()">↓ Export PDF</button>
+        <button class="btn btn-secondary" onclick="resetMode('compare')">⟳ New Comparison</button>
+    </div>`;
+    return html;
+}
+
+// ─── Card Builders ───
+function hashCard(r) {
+    return `<div class="card">
+        <div class="card-header"><span class="card-icon">🔐</span><span class="card-title">Hashes</span></div>
+        <div class="data-row"><span class="data-label">MD5</span>
+            <span class="hash-value" onclick="copyHash('${r.hashes.md5}')">${r.hashes.md5}</span></div>
+        <div class="data-row"><span class="data-label">SHA-1</span>
+            <span class="hash-value" onclick="copyHash('${r.hashes.sha1}')">${r.hashes.sha1}</span></div>
+        <div class="data-row"><span class="data-label">SHA-256</span>
+            <span class="hash-value" onclick="copyHash('${r.hashes.sha256}')">${r.hashes.sha256}</span></div>
+        <button class="vt-btn" onclick="vtLookup('${r.hashes.sha256}', this)">🛡 Lookup on VirusTotal</button>
+        <div class="vt-results" id="vt-${r.hashes.sha256.slice(0,12)}" style="display:none"></div>
+    </div>`;
+}
+
+function typeCard(r) {
+    const conf = r.file_type.match_confidence;
+    const confTag = conf==='high'?'tag-green':conf==='medium'?'tag-yellow':'tag-orange';
+    return `<div class="card">
+        <div class="card-header"><span class="card-icon">🧬</span><span class="card-title">File Type</span></div>
+        <div class="data-row"><span class="data-label">Detected</span><span class="data-value">${r.file_type.detected_type}</span></div>
+        <div class="data-row"><span class="data-label">Claimed</span><span class="data-value">${r.metadata.extension||'none'}</span></div>
+        <div class="data-row"><span class="data-label">Actual</span><span class="data-value">${r.file_type.detected_extension}</span></div>
+        <div class="data-row"><span class="data-label">Magic</span><span class="data-value" style="color:var(--accent-cyan)">${r.file_type.magic_bytes}</span></div>
+        <div class="data-row"><span class="data-label">Confidence</span><span class="tag ${confTag}">${conf.toUpperCase()}</span></div>
+    </div>`;
+}
+
+function entropyCard(r, pct, col) {
+    return `<div class="card">
+        <div class="card-header"><span class="card-icon">📊</span><span class="card-title">Entropy</span></div>
+        <div class="data-row"><span class="data-label">Shannon</span>
+            <span class="data-value" style="color:${col}">${r.entropy.entropy} / 8.0</span></div>
+        <div class="data-row"><span class="data-label">Assessment</span>
+            <span class="data-value">${r.entropy.assessment}</span></div>
+        <div class="entropy-bar-track"><div class="entropy-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+    </div>`;
+}
+
+function metaCard(r) {
+    return `<div class="card">
+        <div class="card-header"><span class="card-icon">📋</span><span class="card-title">Metadata</span></div>
+        <div class="data-row"><span class="data-label">Size</span>
+            <span class="data-value">${r.metadata.file_size_human}</span></div>
+        <div class="data-row"><span class="data-label">Created</span>
+            <span class="data-value">${fmtDate(r.metadata.created)}</span></div>
+        <div class="data-row"><span class="data-label">Modified</span>
+            <span class="data-value">${fmtDate(r.metadata.modified)}</span></div>
+        <div class="data-row"><span class="data-label">Accessed</span>
+            <span class="data-value">${fmtDate(r.metadata.accessed)}</span></div>
+    </div>`;
+}
+
+function stringsCard(r) {
+    const ns = r.metadata.notable_strings;
+    if (!ns || (!ns.urls?.length && !ns.emails?.length && !ns.ip_addresses?.length)) return '';
+    let h = `<div class="card card-full">
+        <div class="card-header"><span class="card-icon">🔍</span><span class="card-title">Embedded Artifacts</span></div>`;
+    if (ns.urls?.length) h += `<div class="data-label" style="margin:8px 0 4px">URLs (${ns.urls.length})</div>
+        <ul class="strings-list">${ns.urls.map(u=>`<li>${esc(u)}</li>`).join('')}</ul>`;
+    if (ns.emails?.length) h += `<div class="data-label" style="margin:8px 0 4px">Emails (${ns.emails.length})</div>
+        <ul class="strings-list">${ns.emails.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`;
+    if (ns.ip_addresses?.length) h += `<div class="data-label" style="margin:8px 0 4px">IPs (${ns.ip_addresses.length})</div>
+        <ul class="strings-list">${ns.ip_addresses.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`;
+    return h + '</div>';
+}
+
+function exifCard(r) {
+    if (!r.metadata.exif) return '';
+    let h = `<div class="card card-full"><div class="card-header"><span class="card-icon">📸</span>
+        <span class="card-title">EXIF</span></div>`;
+    for (const [k,v] of Object.entries(r.metadata.exif))
+        h += `<div class="data-row"><span class="data-label">${k}</span><span class="data-value">${esc(String(v))}</span></div>`;
+    return h + '</div>';
+}
+
+function anomalySection(r) {
+    if (!r.anomalies.length) return '';
+    let h = `<div style="margin-bottom:16px"><div class="card-header" style="margin-bottom:8px">
+        <span class="card-icon">⚠️</span><span class="card-title">Anomalies (${r.anomalies.length})</span></div>`;
+    r.anomalies.forEach(a => {
+        h += `<div class="anomaly-card ${a.severity}">
+            <div class="anomaly-title">${a.title} <span class="tag tag-${a.severity==='critical'?'red':a.severity==='warning'?'orange':'cyan'}">${a.severity.toUpperCase()}</span></div>
+            <div class="anomaly-detail">${a.detail}</div>
+            <div class="anomaly-rec">${a.recommendation}</div></div>`;
+    });
+    return h + '</div>';
+}
+
+// ─── VirusTotal Lookup ───
+async function vtLookup(hash, btn) {
+    const container = document.getElementById('vt-' + hash.slice(0,12));
+    btn.textContent = '⏳ Querying VirusTotal...';
+    btn.disabled = true;
+    try {
+        const res = await fetch('/virustotal/' + hash);
+        const data = await res.json();
+        container.style.display = 'block';
+
+        if (data.status === 'found') {
+            const s = data.stats;
+            const tCol = data.threat_level==='MALICIOUS'?'var(--accent-red)':
+                         data.threat_level==='SUSPICIOUS'?'var(--accent-orange)':
+                         data.threat_level==='LOW_RISK'?'var(--accent-yellow)':'var(--accent-green)';
+            let h = `<div class="vt-header">
+                <span class="vt-threat" style="color:${tCol}">🛡 ${data.threat_level}</span>
+                <span style="font-family:var(--font-mono);font-size:0.8rem;color:var(--text-secondary)">${data.detection_ratio} engines flagged</span>
+            </div>
+            <div class="data-row"><span class="data-label">Malicious</span><span class="data-value" style="color:var(--accent-red)">${s.malicious}</span></div>
+            <div class="data-row"><span class="data-label">Suspicious</span><span class="data-value" style="color:var(--accent-orange)">${s.suspicious}</span></div>
+            <div class="data-row"><span class="data-label">Harmless</span><span class="data-value" style="color:var(--accent-green)">${s.harmless}</span></div>
+            <div class="data-row"><span class="data-label">Undetected</span><span class="data-value">${s.undetected}</span></div>`;
+            if (data.detections.length) {
+                h += `<div style="margin-top:10px;font-size:0.68rem;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase">Top Detections</div>`;
+                data.detections.slice(0,8).forEach(d => {
+                    h += `<div class="vt-detection"><span style="color:var(--text-primary)">${d.engine}</span> — <span style="color:${d.category==='malicious'?'var(--accent-red)':'var(--accent-orange)'}">${d.result}</span></div>`;
+                });
+            }
+            h += `<a href="${data.permalink}" target="_blank" style="display:inline-block;margin-top:10px;font-family:var(--font-mono);font-size:0.7rem;color:var(--accent-purple)">View Full Report on VirusTotal →</a>`;
+            container.innerHTML = h;
+        } else if (data.status === 'not_found') {
+            container.innerHTML = `<div style="color:var(--text-secondary);font-size:0.8rem">🔍 <strong>Not found</strong> — this hash has never been submitted to VirusTotal.</div>`;
+        } else if (data.status === 'no_api_key') {
+            container.innerHTML = `<div style="color:var(--accent-yellow);font-size:0.78rem">⚠️ ${data.message}</div>`;
+        } else {
+            container.innerHTML = `<div style="color:var(--accent-orange);font-size:0.78rem">⚠️ ${data.message||'Lookup failed'}</div>`;
+        }
+    } catch(e) {
+        container.style.display = 'block';
+        container.innerHTML = `<div style="color:var(--accent-red);font-size:0.78rem">Error: ${e.message}</div>`;
+    }
+    btn.textContent = '🛡 Lookup on VirusTotal';
+    btn.disabled = false;
+}
+
+// ─── Actions ───
+function copyHash(h) { navigator.clipboard.writeText(h).then(()=>toast('Hash copied')); }
+function copyJSON(obj) { navigator.clipboard.writeText(JSON.stringify(obj,null,2)).then(()=>toast('JSON copied')); }
+
+async function exportPDF(data) {
+    try {
+        const res = await fetch('/export-pdf', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ report_html: data.report_html, results: data.results,
+                                   title: 'Digital Forensic File Triage Report' })
+        });
+        const blob = await res.blob();
+        dl(blob, `FORENSTIX_${data.results.metadata.filename}.pdf`);
+    } catch(e) { alert('Export failed: '+e.message); }
+}
+
+async function exportComparePDF() {
+    if (!lastCompareData) return;
+    try {
+        const res = await fetch('/export-pdf', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ report_html: lastCompareData.narrative_html,
+                                   results:{metadata:{filename:'comparison'}},
+                                   title: 'Forensic File Comparison Report' })
+        });
+        const blob = await res.blob();
+        dl(blob, 'FORENSTIX_Comparison.pdf');
+    } catch(e) { alert('Export failed: '+e.message); }
+}
+
+function resetMode(mode) {
+    document.getElementById('results' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.remove('active');
+    document.getElementById('results' + mode.charAt(0).toUpperCase() + mode.slice(1)).innerHTML = '';
+    window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ─── Utils ───
+function dl(blob, name) {
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = u; a.download = name; a.click();
+    URL.revokeObjectURL(u);
+}
+function toast(msg) {
+    const t = document.createElement('div'); t.className='toast'; t.textContent=msg;
+    document.body.appendChild(t); setTimeout(()=>t.remove(),2500);
+}
+function fmtDate(iso) { try{return new Date(iso).toLocaleString()}catch{return iso} }
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function riskClass(label) { return (label||'').toLowerCase(); }
+function riskColor(rc) {
+    return {clean:'var(--accent-green)',caution:'var(--accent-yellow)',
+            suspicious:'var(--accent-orange)',critical:'var(--accent-red)'}[rc]||'var(--text-muted)';
+}
+</script>
+</body>
+</html>
