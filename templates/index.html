@@ -49,9 +49,15 @@
 
         /* Header */
         .header { text-align: center; margin-bottom: 36px; padding: 40px 0 20px; }
-        .logo { font-family: var(--font-mono); font-size: 2.8rem; font-weight: 700;
-                 letter-spacing: 12px; color: var(--accent-cyan);
-                 text-shadow: 0 0 30px var(--accent-cyan-dim), 0 0 60px #00f0ff10; }
+        .logo {
+            display: flex; justify-content: center; align-items: center;
+        }
+        .logo img {
+            width: min(100%, 520px);
+            height: auto;
+            display: block;
+            filter: drop-shadow(0 0 30px #00f0ff22) drop-shadow(0 0 40px #ff335522);
+        }
         .tagline { font-size: 0.85rem; color: var(--text-secondary); letter-spacing: 4px;
                    text-transform: uppercase; font-weight: 300; margin-top: 4px; }
         .version-badge { display: inline-block; margin-top: 12px; padding: 3px 14px;
@@ -272,7 +278,9 @@
     <div class="scanline"></div>
     <div class="container">
         <header class="header">
-            <div class="logo">FORENSTIX</div>
+            <div class="logo">
+                <img src="{{ url_for('static', filename='images/forenstix-logo.png') }}" alt="Forenstix logo">
+            </div>
             <div class="tagline">Digital Forensic File Triage</div>
             <div class="version-badge">v1.0 — Batch • VirusTotal • Compare</div>
         </header>
