@@ -67,8 +67,8 @@ This repository now includes `/render.yaml` for one-click Render deployment.
    - `VIRUSTOTAL_API_KEY`
 
 Render will run:
-- Build: `pip install -r requirements.txt`
-- Start: `gunicorn app:app --bind 0.0.0.0:$PORT`
+- Build: `pip install --upgrade pip && pip install -r requirements.txt`
+- Start: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --worker-class sync`
 
 ## Environment Variables
 
