@@ -54,6 +54,22 @@ The repo includes a `Procfile`:
 gunicorn app:app --bind 0.0.0.0:$PORT
 ```
 
+## Deploy on Render (Option 1)
+
+This repository now includes `/render.yaml` for one-click Render deployment.
+
+1. Push this branch to GitHub.
+2. In Render, choose **New +** → **Blueprint**.
+3. Select this repository.
+4. Render will detect `render.yaml` and create the web service automatically.
+5. Set optional environment variables in Render:
+   - `ANTHROPIC_API_KEY`
+   - `VIRUSTOTAL_API_KEY`
+
+Render will run:
+- Build: `pip install -r requirements.txt`
+- Start: `gunicorn app:app --bind 0.0.0.0:$PORT`
+
 ## Environment Variables
 
 - `ANTHROPIC_API_KEY` (optional): enables AI-generated humanized reports
