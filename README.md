@@ -68,7 +68,7 @@ This repository now includes `/render.yaml` for one-click Render deployment.
 
 Render will run:
 - Build: `pip install --upgrade pip && pip install -r requirements.txt`
-- Start: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --worker-class sync`
+- Start: `gunicorn app:app --bind :$PORT --workers 2 --worker-class sync`
 
 ## Environment Variables
 
